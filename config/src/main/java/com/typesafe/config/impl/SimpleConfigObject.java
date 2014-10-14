@@ -348,11 +348,9 @@ final class SimpleConfigObject extends AbstractConfigObject implements Serializa
 
         final Path originalRestrict;
         ResolveContext context;
-        final ResolveSource source;
 
-        ResolveModifier(ResolveContext context, ResolveSource source) {
+        ResolveModifier(ResolveContext context) {
             this.context = context;
-            this.source = source;
             originalRestrict = context.restrictToChild();
         }
 
@@ -362,8 +360,7 @@ final class SimpleConfigObject extends AbstractConfigObject implements Serializa
                 if (key.equals(context.restrictToChild().first())) {
                     Path remainder = context.restrictToChild().remainder();
                     if (remainder != null) {
-                        ResolveResult<? extends AbstractConfigValue> result = context.restrict(remainder).resolve(v,
-                                source);
+                        ResolveResult<? extends AbstractConfigValue> result = context.restrict(remainder).resolve(v);
                         context = result.context.unrestricted().restrict(originalRestrict);
                         return result.value;
                     } else {
@@ -376,7 +373,7 @@ final class SimpleConfigObject extends AbstractConfigObject implements Serializa
                 }
             } else {
                 // no restrictToChild, resolve everything
-                ResolveResult<? extends AbstractConfigValue> result = context.unrestricted().resolve(v, source);
+                ResolveResult<? extends AbstractConfigValue> result = context.unrestricted().resolve(v);
                 context = result.context.unrestricted().restrict(originalRestrict);
                 return result.value;
             }
@@ -385,18 +382,16 @@ final class SimpleConfigObject extends AbstractConfigObject implements Serializa
     }
 
     @Override
-    ResolveResult<? extends AbstractConfigObject> resolveSubstitutions(ResolveContext context, ResolveSource source)
+    ResolveResult<? extends AbstractConfigObject> resolveSubstitutions(ResolveContext context)
             throws NotPossibleToResolve {
         if (resolveStatus() == ResolveStatus.RESOLVED)
             return ResolveResult.make(context, this);
 
-        final ResolveSource sourceWithParent = source.pushParent(this);
-
         try {
-            ResolveModifier modifier = new ResolveModifier(context, sourceWithParent);
+            ResolveModifier modifier = new ResolveModifier(context.pushParent(this));
 
             AbstractConfigValue value = modifyMayThrow(modifier);
-            return ResolveResult.make(modifier.context, value).asObjectResult();
+            return ResolveResult.make(modifier.context.popParent(this), value).asObjectResult();
         } catch (NotPossibleToResolve e) {
             throw e;
         } catch (RuntimeException e) {

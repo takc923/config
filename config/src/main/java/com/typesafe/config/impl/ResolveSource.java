@@ -46,10 +46,13 @@ final class ResolveSource {
         // resolve ONLY portions of the object which are along our path
         if (ConfigImpl.traceSubstitutionsEnabled())
             ConfigImpl.trace("*** finding '" + path + "' in " + obj);
-        Path restriction = context.restrictToChild();
-        ResolveResult<? extends AbstractConfigValue> partiallyResolved = context.restrict(path).resolve(obj,
-                new ResolveSource(obj));
-        ResolveContext newContext = partiallyResolved.context.restrict(restriction);
+        // FIXME here we'll discard any source changes made during the lookup
+        ResolveSource sourceToRestore = context.source();
+        Path restrictionToRestore = context.restrictToChild();
+        ResolveResult<? extends AbstractConfigValue> partiallyResolved = context.restrict(path)
+                .withSource(new ResolveSource(obj)).resolve(obj);
+        ResolveContext newContext = partiallyResolved.context.restrict(restrictionToRestore)
+                .withSource(sourceToRestore);
         if (partiallyResolved.value instanceof AbstractConfigObject) {
             ValueWithPath pair = findInObject((AbstractConfigObject) partiallyResolved.value, path);
             return new ResultWithPath(ResolveResult.make(newContext, pair.value), pair.pathFromRoot);
@@ -169,7 +172,8 @@ final class ResolveSource {
         else if (pathFromRoot == null)
             return this;
         else if (pathFromRoot.head() != parent)
-            throw new ConfigException.BugOrBroken("parent was not pushed, can't pop: " + parent);
+            throw new ConfigException.BugOrBroken("parent was not pushed, can't pop: " + parent + " head was: "
+                    + pathFromRoot.head());
         else
             return new ResolveSource(root, pathFromRoot.tail());
     }
@@ -274,6 +278,23 @@ final class ResolveSource {
     static final class Node<T> implements Iterable<T> {
         final T value;
         final Node<T> next;
+
+        @Override
+        public int hashCode() {
+            return value.hashCode() + 41 * (41 + next.hashCode());
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (other instanceof Node<?>) {
+                if (value == ((Node<?>) other).value)
+                    return true;
+                else
+                    return value.equals(((Node<?>) other).value);
+            } else {
+                return false;
+            }
+        }
 
         Node(T value, Node<T> next) {
             this.value = value;

@@ -177,8 +177,7 @@ abstract class AbstractConfigObject extends AbstractConfigValue implements Confi
     }
 
     @Override
-    abstract ResolveResult<? extends AbstractConfigObject> resolveSubstitutions(ResolveContext context,
-            ResolveSource source)
+    abstract ResolveResult<? extends AbstractConfigObject> resolveSubstitutions(ResolveContext context)
             throws NotPossibleToResolve;
 
     @Override

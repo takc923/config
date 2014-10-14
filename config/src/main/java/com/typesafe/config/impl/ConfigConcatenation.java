@@ -170,7 +170,7 @@ final class ConfigConcatenation extends AbstractConfigValue implements Unmergeab
     }
 
     @Override
-    ResolveResult<? extends AbstractConfigValue> resolveSubstitutions(ResolveContext context, ResolveSource source)
+    ResolveResult<? extends AbstractConfigValue> resolveSubstitutions(ResolveContext context)
             throws NotPossibleToResolve {
         if (ConfigImpl.traceSubstitutionsEnabled()) {
             int indent = context.depth() + 2;
@@ -185,7 +185,7 @@ final class ConfigConcatenation extends AbstractConfigValue implements Unmergeab
         // Right now there's no reason to pushParent here because the
         // content of ConfigConcatenation should not need to replaceChild,
         // but if it did we'd have to do this.
-        ResolveSource sourceWithParent = source; // .pushParent(this);
+        ResolveSource sourceWithParent = context.source(); // .pushParent(this);
         ResolveContext newContext = context;
 
         List<AbstractConfigValue> resolved = new ArrayList<AbstractConfigValue>(pieces.size());
@@ -194,7 +194,7 @@ final class ConfigConcatenation extends AbstractConfigValue implements Unmergeab
             // so unrestrict the context, then put restriction back afterward
             Path restriction = newContext.restrictToChild();
             ResolveResult<? extends AbstractConfigValue> result = newContext.unrestricted()
-                    .resolve(p, sourceWithParent);
+                    .withSource(sourceWithParent).resolve(p);
             AbstractConfigValue r = result.value;
             newContext = result.context.restrict(restriction);
             if (ConfigImpl.traceSubstitutionsEnabled())

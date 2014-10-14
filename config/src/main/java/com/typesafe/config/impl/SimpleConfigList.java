@@ -123,23 +123,22 @@ final class SimpleConfigList extends AbstractConfigValue implements ConfigList, 
 
     private static class ResolveModifier implements Modifier {
         ResolveContext context;
-        final ResolveSource source;
-        ResolveModifier(ResolveContext context, ResolveSource source) {
+
+        ResolveModifier(ResolveContext context) {
             this.context = context;
-            this.source = source;
         }
 
         @Override
         public AbstractConfigValue modifyChildMayThrow(String key, AbstractConfigValue v)
                     throws NotPossibleToResolve {
-            ResolveResult<? extends AbstractConfigValue> result = context.resolve(v, source);
+            ResolveResult<? extends AbstractConfigValue> result = context.resolve(v);
             context = result.context;
             return result.value;
-            }
+        }
     }
 
     @Override
-    ResolveResult<? extends SimpleConfigList> resolveSubstitutions(ResolveContext context, ResolveSource source)
+    ResolveResult<? extends SimpleConfigList> resolveSubstitutions(ResolveContext context)
             throws NotPossibleToResolve {
         if (resolved)
             return ResolveResult.make(context, this);
@@ -150,9 +149,9 @@ final class SimpleConfigList extends AbstractConfigValue implements ConfigList, 
             return ResolveResult.make(context, this);
         } else {
             try {
-                ResolveModifier modifier = new ResolveModifier(context, source.pushParent(this));
+                ResolveModifier modifier = new ResolveModifier(context.pushParent(this));
                 SimpleConfigList value = modifyMayThrow(modifier, ResolveStatus.RESOLVED);
-                return ResolveResult.make(modifier.context, value);
+                return ResolveResult.make(modifier.context.popParent(this), value);
             } catch (NotPossibleToResolve e) {
                 throw e;
             } catch (RuntimeException e) {

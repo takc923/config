@@ -11,6 +11,8 @@ import com.typesafe.config.ConfigResolveOptions;
 import com.typesafe.config.impl.AbstractConfigValue.NotPossibleToResolve;
 
 final class ResolveContext {
+    final private ResolveSource source;
+
     final private ResolveMemos memos;
 
     final private ConfigResolveOptions options;
@@ -27,8 +29,9 @@ final class ResolveContext {
 
     final private Set<AbstractConfigValue> cycleMarkers;
 
-    ResolveContext(ResolveMemos memos, ConfigResolveOptions options, Path restrictToChild,
+    ResolveContext(ResolveSource source, ResolveMemos memos, ConfigResolveOptions options, Path restrictToChild,
             List<AbstractConfigValue> resolveStack, Set<AbstractConfigValue> cycleMarkers) {
+        this.source = source;
         this.memos = memos;
         this.options = options;
         this.restrictToChild = restrictToChild;
@@ -40,10 +43,11 @@ final class ResolveContext {
         return Collections.newSetFromMap(new IdentityHashMap<AbstractConfigValue, Boolean>());
     }
 
-    ResolveContext(ConfigResolveOptions options, Path restrictToChild) {
+    ResolveContext(ResolveSource source, ConfigResolveOptions options, Path restrictToChild) {
         // LinkedHashSet keeps the traversal order which is at least useful
         // in error messages if nothing else
-        this(new ResolveMemos(), options, restrictToChild, new ArrayList<AbstractConfigValue>(), newCycleMarkers());
+        this(source, new ResolveMemos(), options, restrictToChild, new ArrayList<AbstractConfigValue>(),
+                newCycleMarkers());
         if (ConfigImpl.traceSubstitutionsEnabled())
             ConfigImpl.trace(depth(), "ResolveContext restrict to child " + restrictToChild);
     }
@@ -56,7 +60,7 @@ final class ResolveContext {
         Set<AbstractConfigValue> copy = newCycleMarkers();
         copy.addAll(cycleMarkers);
         copy.add(value);
-        return new ResolveContext(memos, options, restrictToChild, resolveStack, copy);
+        return new ResolveContext(source, memos, options, restrictToChild, resolveStack, copy);
     }
 
     ResolveContext removeCycleMarker(AbstractConfigValue value) {
@@ -66,12 +70,12 @@ final class ResolveContext {
         Set<AbstractConfigValue> copy = newCycleMarkers();
         copy.addAll(cycleMarkers);
         copy.remove(value);
-        return new ResolveContext(memos, options, restrictToChild, resolveStack, copy);
+        return new ResolveContext(source, memos, options, restrictToChild, resolveStack, copy);
     }
 
     private ResolveContext memoize(MemoKey key, AbstractConfigValue value) {
         ResolveMemos changed = memos.put(key, value);
-        return new ResolveContext(changed, options, restrictToChild, resolveStack, cycleMarkers);
+        return new ResolveContext(source, changed, options, restrictToChild, resolveStack, cycleMarkers);
     }
 
     ConfigResolveOptions options() {
@@ -91,11 +95,22 @@ final class ResolveContext {
         if (restrictTo == restrictToChild)
             return this;
         else
-            return new ResolveContext(memos, options, restrictTo, resolveStack, cycleMarkers);
+            return new ResolveContext(source, memos, options, restrictTo, resolveStack, cycleMarkers);
     }
 
     ResolveContext unrestricted() {
         return restrict(null);
+    }
+
+    ResolveContext withSource(ResolveSource source) {
+        if (source == this.source)
+            return this;
+        else
+            return new ResolveContext(source, memos, options, restrictToChild, resolveStack, cycleMarkers);
+    }
+
+    ResolveSource source() {
+        return source;
     }
 
     String traceString() {
@@ -117,7 +132,7 @@ final class ResolveContext {
             ConfigImpl.trace(depth(), "pushing trace " + value);
         List<AbstractConfigValue> copy = new ArrayList<AbstractConfigValue>(resolveStack);
         copy.add(value);
-        return new ResolveContext(memos, options, restrictToChild, copy, cycleMarkers);
+        return new ResolveContext(source, memos, options, restrictToChild, copy, cycleMarkers);
     }
 
     ResolveContext popTrace() {
@@ -125,7 +140,7 @@ final class ResolveContext {
         AbstractConfigValue old = copy.remove(resolveStack.size() - 1);
         if (ConfigImpl.traceSubstitutionsEnabled())
             ConfigImpl.trace(depth() - 1, "popped trace " + old);
-        return new ResolveContext(memos, options, restrictToChild, copy, cycleMarkers);
+        return new ResolveContext(source, memos, options, restrictToChild, copy, cycleMarkers);
     }
 
     int depth() {
@@ -134,15 +149,15 @@ final class ResolveContext {
         return resolveStack.size();
     }
 
-    ResolveResult<? extends AbstractConfigValue> resolve(AbstractConfigValue original, ResolveSource source)
+    ResolveResult<? extends AbstractConfigValue> resolve(AbstractConfigValue original)
             throws NotPossibleToResolve {
         if (ConfigImpl.traceSubstitutionsEnabled())
             ConfigImpl
                     .trace(depth(), "resolving " + original + " restrictToChild=" + restrictToChild + " in " + source);
-        return pushTrace(original).realResolve(original, source).popTrace();
+        return pushTrace(original).realResolve(original).popTrace();
     }
 
-    private ResolveResult<? extends AbstractConfigValue> realResolve(AbstractConfigValue original, ResolveSource source)
+    private ResolveResult<? extends AbstractConfigValue> realResolve(AbstractConfigValue original)
             throws NotPossibleToResolve {
         // a fully-resolved (no restrictToChild) object can satisfy a
         // request for a restricted object, so always check that first.
@@ -176,8 +191,16 @@ final class ResolveContext {
                 throw new NotPossibleToResolve(this);
             }
 
-            ResolveResult<? extends AbstractConfigValue> result = original.resolveSubstitutions(this, source);
+            ResolveSource.Node<Container> oldParents = source().pathFromRoot;
+
+            ResolveResult<? extends AbstractConfigValue> result = original.resolveSubstitutions(this);
             AbstractConfigValue resolved = result.value;
+
+            ResolveSource.Node<Container> newParents = result.context.source().pathFromRoot;
+            if (!ConfigImplUtil.equalsHandlingNull(oldParents, newParents)) {
+                throw new ConfigException.BugOrBroken("parents changed by resolve substitution on " + original
+                        + " old " + oldParents + " new " + newParents);
+            }
 
             if (ConfigImpl.traceSubstitutionsEnabled())
                 ConfigImpl.trace(depth(), "resolved to " + resolved + "@" + System.identityHashCode(resolved)
@@ -225,14 +248,35 @@ final class ResolveContext {
     static AbstractConfigValue resolve(AbstractConfigValue value, AbstractConfigObject root,
             ConfigResolveOptions options) {
         ResolveSource source = new ResolveSource(root);
-        ResolveContext context = new ResolveContext(options, null /* restrictToChild */);
+        ResolveContext context = new ResolveContext(source, options, null /* restrictToChild */);
 
         try {
-            return context.resolve(value, source).value;
+            return context.resolve(value).value;
         } catch (NotPossibleToResolve e) {
             // ConfigReference was supposed to catch NotPossibleToResolve
             throw new ConfigException.BugOrBroken(
                     "NotPossibleToResolve was thrown from an outermost resolve", e);
         }
+    }
+
+    ResolveContext pushParent(Container parent) {
+        return withSource(source.pushParent(parent));
+    }
+
+    ResolveContext popParent(Container parent) {
+        return withSource(source.popParent(parent));
+    }
+
+    ResolveContext resetParents() {
+        return withSource(source.resetParents());
+    }
+
+    ResolveContext replaceCurrentParent(Container old, Container replacement) {
+        return withSource(source.replaceCurrentParent(old, replacement));
+    }
+
+    // replacement may be null to delete
+    ResolveContext replaceWithinCurrentParent(AbstractConfigValue old, AbstractConfigValue replacement) {
+        return withSource(source.replaceWithinCurrentParent(old, replacement));
     }
 }

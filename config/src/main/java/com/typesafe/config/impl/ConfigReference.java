@@ -65,17 +65,17 @@ final class ConfigReference extends AbstractConfigValue implements Unmergeable {
     // This way it's impossible for NotPossibleToResolve to "escape" since
     // any failure to resolve has to start with a ConfigReference.
     @Override
-    ResolveResult<? extends AbstractConfigValue> resolveSubstitutions(ResolveContext context, ResolveSource source) {
+    ResolveResult<? extends AbstractConfigValue> resolveSubstitutions(ResolveContext context) {
         ResolveContext newContext = context.addCycleMarker(this);
         AbstractConfigValue v;
         try {
-            ResolveSource.ResultWithPath resultWithPath = source.lookupSubst(newContext, expr, prefixLength);
+            ResolveSource.ResultWithPath resultWithPath = context.source().lookupSubst(newContext, expr, prefixLength);
             newContext = resultWithPath.result.context;
 
             if (resultWithPath.result.value != null) {
                 if (ConfigImpl.traceSubstitutionsEnabled())
                     ConfigImpl.trace(newContext.depth(), "recursively resolving " + resultWithPath
-                            + " which was the resolution of " + expr + " against " + source);
+                            + " which was the resolution of " + expr + " against " + newContext.source());
 
                 ResolveSource recursiveResolveSource = (new ResolveSource(
                         (AbstractConfigObject) resultWithPath.pathFromRoot.last(), resultWithPath.pathFromRoot));
@@ -83,10 +83,13 @@ final class ConfigReference extends AbstractConfigValue implements Unmergeable {
                 if (ConfigImpl.traceSubstitutionsEnabled())
                     ConfigImpl.trace(newContext.depth(), "will recursively resolve against " + recursiveResolveSource);
 
-                ResolveResult<? extends AbstractConfigValue> result = newContext.resolve(resultWithPath.result.value,
-                        recursiveResolveSource);
+                ResolveSource sourceToRestore = newContext.source();
+                ResolveResult<? extends AbstractConfigValue> result = newContext.withSource(recursiveResolveSource)
+                        .resolve(resultWithPath.result.value);
                 v = result.value;
-                newContext = result.context;
+                // put the original source back FIXME this would lose any
+                // changes made
+                newContext = result.context.withSource(sourceToRestore);
             } else {
                 v = null;
             }
